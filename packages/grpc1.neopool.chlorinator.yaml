@@ -1,0 +1,214 @@
+# NeoPool's register set is divided in 7 different pages, which are described below.
+# Each page contains a set of registers, which are used to configure the system, read measurements, and control functions.
+#
+# Starting address Name Name
+# 0x0000 MODBUS - Manages general configuration of the box. This page is reserved for internal purposes
+# 0x0100 MEASURE - Contains the different measurement information including hydrolysis current, pH level, redox level etc.
+# 0x0200 GLOBAL - Contains global information, such as the amount of time that each power unit has been working.
+# 0x0300 FACTORY - Contains factory data such as calibration parameters for the different power units of the box.
+# 0x0400 INSTALLER - Contains a set of configuration registers related to the box installation, such as the relays used for
+# each function, the amount of time that each pump must operate, etc.
+#
+# 0x0500 USER - Contains user configuration registers, such as the production level for the ionization and the
+# hydrolysis, or the set points for the pH, redox, or chlorine regulation loops.
+#
+# 0x0600 MISC - Contains the configuration parameters for the screen controllers (language, colours, sound, etc).
+# Any modifications done over the registers should be made persistent by requestingan EEPROM storage.
+# See MBF_SAVE_TO_EEPROM register description for more information about this subject.
+#
+# The alteration of registers other than the ones described in this document could lead to a bad operation of the
+# system, and in some cases, to an unrecoverable failure requiring technical assistance.
+
+# Measures page (MEASURE)
+
+sensor:
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "NeoPool Ionization Current"
+    register_type: holding
+    address: 0x0100
+    unit_of_measurement: "AH" # 100 indicates a level of 1.00 AH? need to confirm
+    value_type: U_WORD
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "NeoPool Hydrolysis Current"
+    register_type: holding
+    address: 0x0101
+    unit_of_measurement: "AH" # 100 indicates a level of 1.00 AH? need to confirm
+    value_type: U_WORD
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "NeoPool pH Level"
+    register_type: holding
+    address: 0x0102
+    unit_of_measurement: "pH" # 100 indicates a level of 1.00 pH
+    value_type: U_WORD
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "NeoPool Redox Level"
+    register_type: holding
+    address: 0x0103
+    unit_of_measurement: "mV" # 100 indicates a level of 1.00 ppm redox
+    value_type: U_WORD
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "NeoPool Chlorine Level"
+    register_type: holding
+    address: 0x0104
+    unit_of_measurement: "ppm" # 100 indicates a level of 1.00 ppm free chlorine
+    value_type: U_WORD
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "NeoPool Conductivity Level"
+    register_type: holding
+    address: 0x0105
+    unit_of_measurement: "uS/cm" # 100 indicates a level of 1.00 uS/cm conductivity
+    value_type: U_WORD
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "NeoPool Flow Rate"
+    register_type: holding
+    address: 0x0106
+    unit_of_measurement: "L/min" # 100 indicates a level of 1.00 L/min flow rate
+    value_type: U_WORD
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "NeoPool pH Status"
+    register_type: holding
+    address: 0x0107 # See bit field description below for details on the status of the pH module
+
+# Bits Mask Description for 0x0107
+# 0-3 0x000F pH Alarm. The available options are described on the following tables depending on the regulation model.
+# 10 0x0400 Status of control of the pH-chip by flow detector (if it's activated through MBF_PAR_HIDRO_ION_CAUDAL)
+# 11 0x0800 Relay of low pH pump activated (pump activated)
+# 12 0x1000 Relay of high pH pump activated (pump activated)
+# 13 0x2000 Control module of pH active and controlling pumps
+# 14 0x4000 Measure module of pH active and measuring.
+# If this bit is 1, pH value will be shown on the display.
+# 15 0x8000 Measure module of pH detected
+
+# Alarm values available for pH-regulation with acid and base:
+# Alarm values Description
+# 0 No alarm
+# 1 pH too high; pH value is higher than 0,8 points to the set point selected in PH1
+# 2 pH too low: pH value is lower than 0,8 points to the set point selected in PH2
+# 3 pH pump (acid or base) exceeded the work time fixed by the parameter
+# 4 pH value higher than the set point in PH1
+# 5 pH value is lower than the set point in PH2
+
+# Alarm values available for pH-regulation with only acid:
+# Alarm values Description
+# 0 No alarm
+# 1 pH too high; pH value is higher than 0,8 points to the set point selected in PH1
+# 2 pH too low: pH value is lower than 0,8 points to the set point selected in PH2
+# 3 pH pump (acid or base) exceeded the work time fixed by the parameter MBF_PAR_RELAY_PH_MAX_TIME and it's stopped.
+# 4 pH is higher than 0,1 points to the set point in pH1
+# 5 pH is lower than 0,3 points to the set point in pH1
+
+# Alarm values available for pH-regulation with only base:
+# Alarm values Description
+# 0 No alarm
+# 1 pH too high; pH value is higher than 0,8 points to the set point selected in PH2
+# 2 pH too low: pH value is lower than 0,8 points to the set point selected in PH2
+# 3 pH pump (acid or base) exceeded the work time fixed by the parameter MBF_PAR_RELAY_PH_MAX_TIME and it's stopped.
+# 4 pH is higher than 0,1 points to the set point in pH2
+# 5 pH is lower than 0,3 points to the set point in pH2
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "NeoPool RX Status"
+    register_type: holding
+    address: 0x0108
+
+# This register contains the status of the Rx-module. The register is a bit-field with the following topology:
+# Bits Mask Description for 0x0108
+# 12 0x1000 Relay of the Rx-pump on.(pump activated)
+# 13 0x2000 Redox-module active and controlling the pump.
+# 14 0x4000 Measuring Redox-module active. If this bit is on 1, the Redox bar should be shown on the display.
+# 15 0x8000 Measuring Redox-module detected by the system.
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "NeoPool Chlorine Status"
+    register_type: holding
+    address: 0x0109
+
+# This register contains the status of the Chlorine-module. The register is a bit-field with the following topology:
+# Bits Mask Description for 0x0109
+# 3 0x0008 Flow sensor of the chlorine probe. This sensor is incorporate # to the probe and it's used to detect if
+# there's water flowing through the probe. In case the sensor is on 0, the measure won't be valid.
+# 12 0x1000 Relay of the Chlorine-pump on.(pump activated)
+# 13 0x2000 Chlorine-module active and controlling the pump.
+# 14 0x4000 Measuring Chlorine-module active. If this bit is on 1, the Chlorine bar should be shown on the display.
+# 15 0x8000 Measuring Chlorine-module detected by the system.
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "NeoPool Conductivity Status"
+    register_type: holding
+    address: 0x010A
+
+# This register contains the status of the Conductivity-module. The register is a bit-field with the following topology:
+# Bits Mask Description for 0x010A
+# 12 0x1000 Relay of the Conductivity-pump on.(pump activated)
+# 13 0x2000 Conductivity-module active and controlling the pump.
+# 14 0x4000 Measuring Conductivity-module active. If this bit is on 1, the
+# COnductivity bar should be shown on the display.
+# 15 0x8000 Measuring Conductivity-module detected by the system.
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "NeoPool Ionization Status"
+    register_type: holding
+    address: 0x010C
+
+# This register contains the status of the Ionization-module. The register is a bit-field with the following topology:
+# Bits Mask Description for 0x010C
+# 0 0x0001 On Target – the system reached the set point.
+# 1 0x0002 Low – The ionization can't reach the set point.
+# 2 0x0004 Elec – Reserved
+# 3 0x0008 Pr off – Programmed time exceeded
+# 12 0x1000 Ion Pol off – Dead time
+# 13 0x2000 Ion Pol 1 – Ionization working (Pol 1)
+# 14 0x4000 Ion Pol 2 – Ionization working (Pol 2)
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "NeoPool Hydrolysis Status"
+    register_type: holding
+    address: 0x010D
+
+# This register contains the status of the Hydrolysis-module. The register is a bit-field with the following topology:
+# Bits Mask Description for 0x010D
+# 0 0x0001 On Target – the system reached the set point.
+# 1 0x0002 Low – The hydrolysis can't reach the set point.
+# 2 0x0004 Elec – Reserved
+# 3 0x0008 Flow – Flow indicator in the hydrolysis chamber (FL1).
+# 4 0x0010 Cover – Cover entry activated.
+# 5 0x0020 Active – Hydrolysis-module active (hidroEnable)
+# 6 0x0040 Control – Hydrolysis-module working with regulation (hidroControlEnable)
+# 7 0x0080 Redox enable – Hydrolysis acivated by the Redoxmodule (rx_hen)
+# 8 0x0100 Hidro shock enabled – Chlorine boost activated.
+# 9 0x0200 FL2 – Flow detector of the chlorine probe, if it's present.
+# 10 0x0400 Cl enable – Activation of the hydrolysis by the Chlorinemodule (cl_hen)
+# 11 0x0800 No use
+# 12 0x1000 Ion Pol off – Dead time (Ionization)
+# 13 0x2000 Ion Pol 1 – Ionization working (Pol 1)
+# 14 0x4000 Ion Pol 2 – Ionization working (Pol 2)
+# 15 0x8000 No use
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "NeoPool Relay Status"
+    register_type: holding
+    address: 0x010E
+
+# This register contains the status of each configurable relays:
+# Bits Mask Description for 0x010E
+# 0 0x0001 Status relay 1 (1 on; 0 off) (normally assigned to ph)
+# 1 0x0002 Status relay 2 (1 on; 0 off) (normally assigned to filtration)
+# 2 0x0004 Status relay 3 (1 on; 0 off) (normally assigned to lightning)
+# 3 0x0008 Status relay 4
+# 4 0x0010 Status relay 5
+# 5 0x0020 Status relay 6
+# 6 0x0040 Status relay 7

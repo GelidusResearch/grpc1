@@ -1,0 +1,9 @@
+# TODO Add the base configuration for the Neptune Pump Model X. This is a placeholder for the actual configuration that will be added later.
+sensor:
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Neptune Pump RPM"
+    register_type: holding
+    address: 0x0001    ## address of the register inside the Modbus slave device
+    unit_of_measurement: "RPM"
+    value_type: U_WORD

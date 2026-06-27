@@ -1,0 +1,181 @@
+substitutions:
+  device_name: grpc
+  device_comment: Garage Door Controller
+  device_type: ESP32-C6-H4 WiFi6 BT5 IEEE802.15.4 Single Core + LP Core 160MHz
+  disp_name: GRPC1
+  id_prefix: grpc1
+
+  rs485_p1_rx_pin: GPIO2
+  rs485_p1_tx_pin: GPIO3
+  rs485_p1_flow_control_pin: GPIO22
+  rs485_p2_rx_pin: GPIO5
+  rs485_p2_tx_pin: GPIO4
+  rs485_p2_flow_control_pin: GPIO21
+  relay_1_pin: GPIO11
+  relay_2_pin: GPIO10
+
+  button1_pin: GPIO18
+  button2_pin: GPIO15
+  button3_pin: GPIO20
+  button4_pin: GPIO19
+
+
+esp32:
+  board: esp32-c6-devkitc-1
+  flash_size: 4MB
+  variant: esp32c6
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+#      CONFIG_ESPTOOLPY_FLASHSIZE_4MB: y
+#      CONFIG_BT_BLE_50_FEATURES_SUPPORTED: y
+#      CONFIG_BT_BLE_42_FEATURES_SUPPORTED: y
+#      CONFIG_OPENTHREAD_ENABLED: n
+      CONFIG_ENABLE_WIFI_STATION: y
+#      CONFIG_USE_MINIMAL_MDNS: y
+#      CONFIG_LOG_DEFAULT_LEVEL_VERBOSE: y
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${disp_name}
+  name_add_mac_suffix: true
+  project:
+    name: Gelidus Research.Pool Controller
+    version: '1.0'
+
+# Primarily for known devices WIP
+#packages:
+#  remote_package_files:
+#    url: https://github.com/gelidusresearch/grpc1
+#    files:
+#      - path: packages/grpc1.neopool.chlorinator.yaml
+#        vars:
+#          modbus_controller: modbus_device1
+#      - path: packages/grpc1.neptune.pump.yaml e.g.
+#      - path: packages/grpc1.ocean.pump.yaml e.g
+#      - path: packages/grpc1.emaux-spv.pump.yaml e.g.
+#    ref: main
+#    refresh: 1d
+
+dashboard_import:
+  package_import_url: github://gelidusresearch/grpc1/grpc1.base.yaml@main
+  import_full_config: true
+
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+    password: ''
+
+wifi:
+  enable_btm: true
+  enable_rrm: true
+  output_power: 20dB
+  ap:
+
+captive_portal:                      # Comment out with Thread networks
+
+improv_serial:                       # Comment out with Thread networks
+
+safe_mode:                           # Highly recommended when making frequent changes
+
+web_server:                          # Works with Thread networks and will be slow on initial load
+  port: 80
+  version: 3
+
+uart:
+  - id: modbus_uart1
+    tx_pin: ${rs485_p1_tx_pin}
+    rx_pin: ${rs485_p1_rx_pin}
+    baud_rate: 9600
+  - id: modbus_uart2
+    tx_pin: ${rs485_p2_tx_pin}
+    rx_pin: ${rs485_p2_rx_pin}
+    baud_rate: 9600
+
+modbus:
+  - uart_id: modbus_uart1
+    flow_control_pin: ${rs485_p1_flow_control_pin}
+    id: modbus_port1
+  - uart_id: modbus_uart2
+    flow_control_pin: ${rs485_p2_flow_control_pin}
+    id: modbus_port2
+
+modbus_controller:
+- id: modbus_device1
+  address: 0x1            # example address of the Modbus slave device on the bus
+  modbus_id: modbus_port1
+  setup_priority: -10
+  update_interval: 10s
+- id: modbus_device2
+  address: 0x2            # example address of the Modbus slave device on the bus
+  modbus_id: modbus_port2
+  setup_priority: -10
+  update_interval: 10s
+- id: modbus_device3
+  address: 0x10           # example address of the Modbus slave device on the bus
+  modbus_id: modbus_port1
+  setup_priority: -10
+  update_interval: 10s
+
+
+# Optional control of the relays via a button connected to GPIO20 etc
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: ${button1_pin}
+      mode: INPUT_PULLDOWN
+    id: button1
+# Default behavior of the button is to toggle relay 1
+    on_press:
+      - switch.toggle: grpc1_relay_1
+  - platform: gpio
+    pin:
+      number: ${button2_pin}
+      mode: INPUT_PULLDOWN
+    id: button2
+# Default behavior of the button is to toggle relay 2
+    on_press:
+      - switch.toggle: grpc1_relay_2
+  - platform: gpio
+    pin:
+      number: ${button3_pin}
+      mode: INPUT_PULLDOWN
+    id: button3
+  - platform: gpio
+    pin:
+      number: ${button4_pin}
+      mode: INPUT_PULLDOWN
+    id: button4
+
+switch:
+  - platform: gpio
+    name: "Relay1"
+    id: grpc1_relay_1
+    pin:
+      number: ${relay_1_pin}
+      mode:
+        output: true
+        pullup: true
+      inverted: true
+# Warning restoring default will attemp a return to last state on boot and then default off
+# which may not be desired. From a safety perspective, it is better to have the relays off on boot.
+# If you still want to restore the last state, uncomment the line below.
+#    restore_mode: RESTORE_DEFAULT_OFF
+  - platform: gpio
+    name: "Relay2"
+    pin:
+      number: ${relay_2_pin}
+      mode:
+        output: true
+        pullup: true
+      inverted: true
+    id: grpc1_relay_2
+#    restore_mode: RESTORE_DEFAULT_OFF
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
