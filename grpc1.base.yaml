@@ -1,6 +1,6 @@
 substitutions:
   device_name: grpc
-  device_comment: Garage Door Controller
+  device_comment: Pool Controller
   device_type: ESP32-C6-H4 WiFi6 BT5 IEEE802.15.4 Single Core + LP Core 160MHz
   disp_name: GRPC1
   id_prefix: grpc1
@@ -58,7 +58,7 @@ esphome:
 
 #      - path: packages/grpc1.omnipl.chlorinator.yaml
 #        vars:
-#          modbus_controller: modbus_device1       
+#          modbus_controller: modbus_device1
 
 #      - path: packages/grpc1.ocean.pump.yaml e.g
 #      - path: packages/grpc1.emaux-spv.pump.yaml e.g.
