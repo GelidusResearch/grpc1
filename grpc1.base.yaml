@@ -51,7 +51,15 @@ esphome:
 #      - path: packages/grpc1.neopool.chlorinator.yaml
 #        vars:
 #          modbus_controller: modbus_device1
-#      - path: packages/grpc1.neptune.pump.yaml e.g.
+
+#      - path: packages/grpc1.neptune.pump.yaml
+#        vars:
+#          modbus_controller: modbus_device1
+
+#      - path: packages/grpc1.omnipl.chlorinator.yaml
+#        vars:
+#          modbus_controller: modbus_device1       
+
 #      - path: packages/grpc1.ocean.pump.yaml e.g
 #      - path: packages/grpc1.emaux-spv.pump.yaml e.g.
 #    ref: main

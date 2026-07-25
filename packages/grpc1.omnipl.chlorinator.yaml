@@ -1,0 +1,552 @@
+################################################################################
+# ESPHome MODBUS Controller — Hayward OmniPL Pool Controller
+#
+# Reverse-engineered from firmware: OPLMP_AP_R0502000
+# Platform : NXP Kinetis MK22F256 (ARM Cortex-M4)
+# Protocol : MODBUS RTU over RS-485
+# Baud rate: 38400 (confirmed @ flash offset 0x23DD1)
+# CRC      : CRC-16/MODBUS polynomial 0xA001 (confirmed @ 0x11EBE)
+# Slave ID : 0x22 (34 dec) — Hayward HPN device address; change if your unit
+#            reports differently (some units default to 0x01)
+#
+# WIRING (RS-485 half-duplex):
+#   ESP32 TX  → MAX485 DI   (or similar RS-485 transceiver)
+#   ESP32 RX  → MAX485 RO
+#   ESP32 GPIO (flow ctrl) → MAX485 DE + RE (tied together)
+#   MAX485 A/B → OmniPL RS-485 bus terminals
+#
+# CONFIRMED FUNCTION CODES (from disassembly):
+#   FC01 Read Coils             — relay / output states
+#   FC02 Read Discrete Inputs   — binary sensor states
+#   FC03 Read Holding Registers — configuration & setpoints
+#   FC04 Read Input Registers   — live sensor measurements
+#   FC05 Write Single Coil      — control individual relay (6 coils, addr 1-6)
+#   FC06 Write Single Register  — write single config value
+#   FC0F Write Multiple Coils   — bulk relay control
+#   FC10 Write Multiple Regs    — bulk configuration write
+#   FC11 Report Slave ID        — device identification
+#   FC17 Read/Write Multiple    — combined read-write
+#
+# REGISTER MAP (derived from binary analysis):
+#
+#  ┌────────────────────────────────────────────────────────────────────────┐
+#  │ COILS  (FC01 read / FC05 write)  — 6 outputs                           │
+#  │  Addr 1 : Circuit / Relay 1     (Pool pump)                            │
+#  │  Addr 2 : Circuit / Relay 2     (Spa pump / booster)                   │
+#  │  Addr 3 : Circuit / Relay 3     (Aux 1 — pool lights, relay-idx=2)     │
+#  │  Addr 4 : Circuit / Relay 4     (Aux 2)                                │
+#  │  Addr 5 : Circuit / Relay 5     (Heater, relay-idx=4)                  │
+#  │  Addr 6 : Circuit / Relay 6     (Aux 3 / chlorinator enable)           │
+#  ├────────────────────────────────────────────────────────────────────────┤
+#  │ INPUT REGISTERS  (FC04 read-only) — live sensor data                   │
+#  │  0x0701 (1793) : Water temperature channel 1  (pool)   — tenths °F     │
+#  │  0x0702 (1794) : Water temperature channel 2  (spa)    — tenths °F     │
+#  │  0x0703 (1795) : Water temperature channel 3  (solar)  — tenths °F     │
+#  │  0x0705 (1797) : Air temperature                       — tenths °F     │
+#  │  0x0706 (1798) : Aux temperature / body 2              — tenths °F     │
+#  │  0x0711 (1809) : pH value                              — hundredths    │
+#  │  0x0712 (1810) : ORP (oxidation-reduction potential)   — mV            │
+#  │  0x0713 (1811) : Salt concentration                    — PPM           │
+#  │  0x0714 (1812) : Chlorinator output                    — percent (%)   │
+#  │  0x0716 (1814) : Flow rate / flow sensor               — raw           │
+#  │  0x0717 (1815) : Conductivity / water balance          — raw           │
+#  │  0x0719 (1817) : Sensor channel 7                      — raw           │
+#  │  0x071A (1818) : Sensor channel 8                      — raw           │
+#  │  0x071B (1819) : Sensor channel 9                      — raw           │
+#  │  0x0781 (1921) : Chlorinator cell hours / diagnostics  — raw           │
+#  │  0x0782 (1922) : Pump speed / flow setpoint            — RPM           │
+#  │  0x0783 (1923) : Pump pressure                         — PSI × 10      │
+#  │  0x0784 (1924) : Pump power / watts                    — watts         │
+#  ├────────────────────────────────────────────────────────────────────────┤
+#  │ HOLDING REGISTERS  (FC03 read / FC10 write) — configuration            │
+#  │  0x0101 (257)  : Pool heater setpoint                  — tenths °F     │
+#  │  0x0103 (259)  : Spa heater setpoint                   — tenths °F     │
+#  │  0x0105 (261)  : Solar setpoint / differential         — tenths °F     │
+#  │  0x0107 (263)  : Device / MODBUS address               — integer       │
+#  │  0x0109 (265)  : Freeze protection setpoint            — tenths °F     │
+#  │  0x010B (267)  : Air temperature offset / calibration  — tenths °F     │
+#  │  0x0111 (273)  : pH setpoint                           — hundredths    │
+#  │  0x0113 (275)  : pH dosing limit / tolerance           — hundredths    │
+#  │  0x0115 (277)  : ORP setpoint                          — mV            │
+#  │  0x0117 (279)  : Salt setpoint / target concentration  — PPM           │
+#  │  0x0181 (385)  : Relay/circuit 1 name code            — integer        │
+#  │  0x0183 (387)  : Relay/circuit 2 name code            — integer        │
+#  │  0x0185 (389)  : Relay/circuit 3 name code            — integer        │
+#  │  0x0205 (517)  : Schedule / timer register A           — encoded       │
+#  │  0x0206 (518)  : Schedule / timer register B           — encoded       │
+#  │  0x020E (526)  : System status flags                   — bitmask       │
+#  │  0x0305 (773)  : Circuit/relay 1 schedule assign       — encoded       │
+#  │  0x0403 (1027) : Feature setpoint A                    — raw           │
+#  │  0x0404 (1028) : Feature setpoint B                    — raw           │
+#  │  0x0405 (1029) : Chlorinator % output setpoint         — percent       │
+#  │  0x0406 (1030) : Chlorinator boost mode setpoint       — hours         │
+#  │  0x0419 (1049) : Pump speed setpoint 1                 — RPM           │
+#  │  0x041A (1050) : Pump speed setpoint 2                 — RPM           │
+#  └────────────────────────────────────────────────────────────────────────┘
+#
+#  This table is the product of Gelidus Research reverse engineering and may
+#  require value adjustments. Such as multipliers an types such as °F vs °C
+################################################################################
+
+
+
+
+
+################################################################################
+# ─── SENSORS — Input Registers FC04 (read-only, live measurements) ───────────
+################################################################################
+sensor:
+  # ── Temperatures ─────────────────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Pool Water Temperature"
+    id: pool_temp
+    register_type: read          # FC04 Read Input Registers
+    address: 0x0701              # Reg 1793 — pool temp channel
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    value_type: U_WORD
+    filters:
+      - multiply: 0.1            # Firmware stores tenths: 785 → 78.5 °F
+    accuracy_decimals: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Spa Water Temperature"
+    id: spa_temp
+    register_type: read
+    address: 0x0702              # Reg 1794 — spa/body-2 temp
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    value_type: U_WORD
+    filters:
+      - multiply: 0.1
+    accuracy_decimals: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Solar Panel Temperature"
+    id: solar_temp
+    register_type: read
+    address: 0x0703              # Reg 1795 — solar collector temp
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    value_type: U_WORD
+    filters:
+      - multiply: 0.1
+    accuracy_decimals: 1
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: 'return x == 6553.5f;'   # 0xFFFF / 10 = no sensor
+            then:
+              - logger.log: "Solar sensor not installed"
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Air Temperature"
+    id: air_temp
+    register_type: read
+    address: 0x0705              # Reg 1797
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    value_type: U_WORD
+    filters:
+      - multiply: 0.1
+    accuracy_decimals: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Aux Body Temperature"
+    id: aux_temp
+    register_type: read
+    address: 0x0706              # Reg 1798 — confirmed MOVW @ 0x09520
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    value_type: U_WORD
+    filters:
+      - multiply: 0.1
+    accuracy_decimals: 1
+
+  # ── Water chemistry ───────────────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Pool pH"
+    id: pool_ph
+    register_type: read
+    address: 0x0711              # Reg 1809 — pH × 100 (e.g. 750 → 7.50)
+    unit_of_measurement: "pH"
+    state_class: measurement
+    value_type: U_WORD
+    filters:
+      - multiply: 0.01
+    accuracy_decimals: 2
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Pool ORP"
+    id: pool_orp
+    register_type: read
+    address: 0x0712              # Reg 1810 — ORP in mV
+    unit_of_measurement: "mV"
+    state_class: measurement
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Salt Concentration"
+    id: pool_salt
+    register_type: read
+    address: 0x0713              # Reg 1811 — salt in PPM
+    unit_of_measurement: "PPM"
+    state_class: measurement
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Chlorinator Output"
+    id: chlorinator_output
+    register_type: read
+    address: 0x0714              # Reg 1812 — confirmed MOVW @ 0x09732
+    unit_of_measurement: "%"
+    state_class: measurement
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Flow Rate"
+    id: pool_flow
+    register_type: read
+    address: 0x0716              # Reg 1814
+    unit_of_measurement: "GPM"
+    state_class: measurement
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  # ── Pump (variable-speed) ─────────────────────────────────────────────────
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Pump Speed"
+    id: pump_speed
+    register_type: read
+    address: 0x0782              # Reg 1922 — VSP RPM, confirmed MOVW @ 0x028D6
+    unit_of_measurement: "RPM"
+    state_class: measurement
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Pump Power"
+    id: pump_power
+    register_type: read
+    address: 0x0784              # Reg 1924 — watts
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Pump Pressure"
+    id: pump_pressure
+    register_type: read
+    address: 0x0783              # Reg 1923 — PSI × 10
+    unit_of_measurement: "PSI"
+    state_class: measurement
+    value_type: U_WORD
+    filters:
+      - multiply: 0.1
+    accuracy_decimals: 1
+
+  # ── Holding register sensors (FC03) — configuration reads ─────────────────
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Pool Heat Setpoint (read)"
+    id: pool_heat_sp_read
+    register_type: holding      # FC03 Read Holding Registers
+    address: 0x0101             # Reg 257 — confirmed MOVW @ 0x03E40
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    value_type: U_WORD
+    filters:
+      - multiply: 0.1
+    accuracy_decimals: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Spa Heat Setpoint (read)"
+    id: spa_heat_sp_read
+    register_type: holding
+    address: 0x0103             # Reg 259 — confirmed MOVW @ 0x03E5C
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    value_type: U_WORD
+    filters:
+      - multiply: 0.1
+    accuracy_decimals: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "pH Setpoint (read)"
+    id: ph_setpoint_read
+    register_type: holding
+    address: 0x0111             # Reg 273 — confirmed MOVW @ 0x03E86
+    unit_of_measurement: "pH"
+    state_class: measurement
+    value_type: U_WORD
+    filters:
+      - multiply: 0.01
+    accuracy_decimals: 2
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "ORP Setpoint (read)"
+    id: orp_setpoint_read
+    register_type: holding
+    address: 0x0115             # Reg 277 — confirmed MOVW @ 0x03FBA
+    unit_of_measurement: "mV"
+    state_class: measurement
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Chlorinator Setpoint (read)"
+    id: chlor_sp_read
+    register_type: holding
+    address: 0x0405             # Reg 1029 — confirmed MOVW @ 0x03F40
+    unit_of_measurement: "%"
+    state_class: measurement
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Pump Speed Setpoint 1 (read)"
+    id: pump_sp1_read
+    register_type: holding
+    address: 0x0419             # Reg 1049 — confirmed MOVW @ 0x0386E
+    unit_of_measurement: "RPM"
+    state_class: measurement
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Pump Speed Setpoint 2 (read)"
+    id: pump_sp2_read
+    register_type: holding
+    address: 0x041A             # Reg 1050 — confirmed MOVW @ 0x03896
+    unit_of_measurement: "RPM"
+    state_class: measurement
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+################################################################################
+# ─── BINARY SENSORS — Coils FC01 (relay/output states) ──────────────────────
+################################################################################
+binary_sensor:
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Pool Pump Active"
+    id: relay_pool_pump
+    register_type: coil         # FC01 Read Coils
+    address: 1                  # Coil 1 (1-based, confirmed 6 coils total)
+    device_class: running
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Spa Pump Active"
+    id: relay_spa_pump
+    register_type: coil
+    address: 2                  # Coil 2
+    device_class: running
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Aux 1 (Pool Lights) Active"
+    id: relay_aux1
+    register_type: coil
+    address: 3                  # Coil 3 — relay-index=2 confirmed in handler
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Aux 2 Active"
+    id: relay_aux2
+    register_type: coil
+    address: 4                  # Coil 4
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Heater Active"
+    id: relay_heater
+    register_type: coil
+    address: 5                  # Coil 5 — relay-index=4 confirmed in handler
+    device_class: heat
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Aux 3 / Chlorinator Active"
+    id: relay_aux3
+    register_type: coil
+    address: 6                  # Coil 6 (last valid, confirmed by BHI >5 guard)
+
+################################################################################
+# ─── SWITCHES — Write coils FC05 (relay control) ─────────────────────────────
+################################################################################
+switch:
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Pool Pump"
+    id: sw_pool_pump
+    register_type: coil         # FC05 Write Single Coil
+    address: 1
+    bitmask: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Spa Pump"
+    id: sw_spa_pump
+    register_type: coil
+    address: 2
+    bitmask: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Pool Lights"
+    id: sw_lights
+    register_type: coil
+    address: 3
+    bitmask: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Aux 2"
+    id: sw_aux2
+    register_type: coil
+    address: 4
+    bitmask: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Heater"
+    id: sw_heater
+    register_type: coil
+    address: 5
+    bitmask: 1
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Aux 3 / Chlorinator"
+    id: sw_aux3
+    register_type: coil
+    address: 6
+    bitmask: 1
+
+################################################################################
+# ─── NUMBERS — Write holding registers FC06/FC10 (setpoints) ─────────────────
+################################################################################
+number:
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Pool Heat Setpoint"
+    id: pool_heat_setpoint
+    register_type: holding      # FC06/FC10
+    address: 0x0101             # Reg 257
+    value_type: U_WORD
+    min_value: 600              # 60.0 °F (stored × 10)
+    max_value: 1040             # 104.0 °F
+    step: 5                     # 0.5 °F increments
+    multiply: 10                # ESPHome value ÷ 10 = °F display... see note
+    unit_of_measurement: "°F"
+    # NOTE: ESPHome `number` writes the raw value. If your setpoint is in °F
+    # (e.g. 86 °F), and the register stores tenths (860), set multiply: 10 here
+    # and enter the °F value in the UI. Adjust if firmware uses whole degrees.
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Spa Heat Setpoint"
+    id: spa_heat_setpoint
+    register_type: holding
+    address: 0x0103             # Reg 259
+    value_type: U_WORD
+    min_value: 600
+    max_value: 1040
+    step: 5
+    multiply: 10
+    unit_of_measurement: "°F"
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "ORP Setpoint"
+    id: orp_setpoint
+    register_type: holding
+    address: 0x0115             # Reg 277
+    value_type: U_WORD
+    min_value: 400
+    max_value: 900
+    step: 10
+    unit_of_measurement: "mV"
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Chlorinator Output Setpoint"
+    id: chlor_setpoint
+    register_type: holding
+    address: 0x0405             # Reg 1029 — confirmed MOVW @ 0x03F40
+    value_type: U_WORD
+    min_value: 0
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Pump Speed Setpoint 1"
+    id: pump_sp1
+    register_type: holding
+    address: 0x0419             # Reg 1049 — confirmed MOVW @ 0x0386E
+    value_type: U_WORD
+    min_value: 600
+    max_value: 3450
+    step: 50
+    unit_of_measurement: "RPM"
+
+  - platform: modbus_controller
+    modbus_controller_id: ${modbus_controller}
+    name: "Pump Speed Setpoint 2"
+    id: pump_sp2
+    register_type: holding
+    address: 0x041A             # Reg 1050 — confirmed MOVW @ 0x03896
+    value_type: U_WORD
+    min_value: 600
+    max_value: 3450
+    step: 50
+    unit_of_measurement: "RPM"
+
+################################################################################
+# ─── TEXT SENSOR — FC11 Report Slave ID (device identity) ────────────────────
+################################################################################
+# ESPHome does not have a native FC11 component; use a raw MODBUS command via
+# the modbus_controller lambda action if needed.
+#
+# Example automation to query FC11 on boot:
+# interval:
+#   - interval: never
+#     then:
+#       - modbus_controller.raw_request:
+#           id: ${modbus_controller}
+#           request: [0x22, 0x11, 0xXX, 0xXX]   # addr + FC11 + CRC
