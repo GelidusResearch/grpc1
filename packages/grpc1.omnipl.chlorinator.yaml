@@ -269,35 +269,10 @@ sensor:
       - multiply: 0.1
     accuracy_decimals: 1
 
-  # ── Holding register sensors (FC03) — configuration reads ─────────────────
-  - platform: modbus_controller
-    modbus_controller_id: ${modbus_controller}
-    name: "Pool Heat Setpoint (read)"
-    id: pool_heat_sp_read
-    register_type: holding      # FC03 Read Holding Registers
-    address: 0x0101             # Reg 257 — confirmed MOVW @ 0x03E40
-    unit_of_measurement: "°F"
-    device_class: temperature
-    state_class: measurement
-    value_type: U_WORD
-    filters:
-      - multiply: 0.1
-    accuracy_decimals: 1
-
-  - platform: modbus_controller
-    modbus_controller_id: ${modbus_controller}
-    name: "Spa Heat Setpoint (read)"
-    id: spa_heat_sp_read
-    register_type: holding
-    address: 0x0103             # Reg 259 — confirmed MOVW @ 0x03E5C
-    unit_of_measurement: "°F"
-    device_class: temperature
-    state_class: measurement
-    value_type: U_WORD
-    filters:
-      - multiply: 0.1
-    accuracy_decimals: 1
-
+  # ── Holding register sensor (FC03) — pH setpoint read-only ──────────────────
+  # Note: all other holding-register setpoints (heat, ORP, chlorinator, pump
+  # speeds) are read by their corresponding `number` entities below, so no
+  # duplicate sensor is needed for those addresses.
   - platform: modbus_controller
     modbus_controller_id: ${modbus_controller}
     name: "pH Setpoint (read)"
@@ -310,50 +285,6 @@ sensor:
     filters:
       - multiply: 0.01
     accuracy_decimals: 2
-
-  - platform: modbus_controller
-    modbus_controller_id: ${modbus_controller}
-    name: "ORP Setpoint (read)"
-    id: orp_setpoint_read
-    register_type: holding
-    address: 0x0115             # Reg 277 — confirmed MOVW @ 0x03FBA
-    unit_of_measurement: "mV"
-    state_class: measurement
-    value_type: U_WORD
-    accuracy_decimals: 0
-
-  - platform: modbus_controller
-    modbus_controller_id: ${modbus_controller}
-    name: "Chlorinator Setpoint (read)"
-    id: chlor_sp_read
-    register_type: holding
-    address: 0x0405             # Reg 1029 — confirmed MOVW @ 0x03F40
-    unit_of_measurement: "%"
-    state_class: measurement
-    value_type: U_WORD
-    accuracy_decimals: 0
-
-  - platform: modbus_controller
-    modbus_controller_id: ${modbus_controller}
-    name: "Pump Speed Setpoint 1 (read)"
-    id: pump_sp1_read
-    register_type: holding
-    address: 0x0419             # Reg 1049 — confirmed MOVW @ 0x0386E
-    unit_of_measurement: "RPM"
-    state_class: measurement
-    value_type: U_WORD
-    accuracy_decimals: 0
-
-  - platform: modbus_controller
-    modbus_controller_id: ${modbus_controller}
-    name: "Pump Speed Setpoint 2 (read)"
-    id: pump_sp2_read
-    register_type: holding
-    address: 0x041A             # Reg 1050 — confirmed MOVW @ 0x03896
-    unit_of_measurement: "RPM"
-    state_class: measurement
-    value_type: U_WORD
-    accuracy_decimals: 0
 
 ################################################################################
 # ─── BINARY SENSORS — Coils FC01 (relay/output states) ──────────────────────
@@ -399,7 +330,7 @@ binary_sensor:
 
   - platform: modbus_controller
     modbus_controller_id: ${modbus_controller}
-    name: "Aux 3 / Chlorinator Active"
+    name: "Aux 3 Chlorinator Active"
     id: relay_aux3
     register_type: coil
     address: 6                  # Coil 6 (last valid, confirmed by BHI >5 guard)
@@ -450,7 +381,7 @@ switch:
 
   - platform: modbus_controller
     modbus_controller_id: ${modbus_controller}
-    name: "Aux 3 / Chlorinator"
+    name: "Aux 3 Chlorinator"
     id: sw_aux3
     register_type: coil
     address: 6
@@ -494,7 +425,7 @@ number:
     name: "ORP Setpoint"
     id: orp_setpoint
     register_type: holding
-    address: 0x0115             # Reg 277
+    address: 0x0115           # Reg 277
     value_type: U_WORD
     min_value: 400
     max_value: 900
@@ -506,7 +437,7 @@ number:
     name: "Chlorinator Output Setpoint"
     id: chlor_setpoint
     register_type: holding
-    address: 0x0405             # Reg 1029 — confirmed MOVW @ 0x03F40
+    address: 0x0405          # Reg 1029
     value_type: U_WORD
     min_value: 0
     max_value: 100
@@ -518,7 +449,7 @@ number:
     name: "Pump Speed Setpoint 1"
     id: pump_sp1
     register_type: holding
-    address: 0x0419             # Reg 1049 — confirmed MOVW @ 0x0386E
+    address: 0x0419         # Reg 1049
     value_type: U_WORD
     min_value: 600
     max_value: 3450
@@ -530,7 +461,7 @@ number:
     name: "Pump Speed Setpoint 2"
     id: pump_sp2
     register_type: holding
-    address: 0x041A             # Reg 1050 — confirmed MOVW @ 0x03896
+    address: 0x041A        # Reg 1050
     value_type: U_WORD
     min_value: 600
     max_value: 3450
